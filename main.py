@@ -27,7 +27,7 @@ WAIT_TIME = 180
 DYNAMIC_ANALYSIS_TIME = 600
 
 # Directory for different ABIs, refer to: https://developer.android.com/ndk/guides/abis
-ABI_DIRS = ['lib/armeabi-v7a/', 'lib/arm64-v8a/', 'lib/x86/', 'lib/x86_64/', 'lib/armeabi/', 'lib/mips/', 'lib/mips64/']
+ABI_DIRS = ['lib/arm64-v8a/', 'lib/armeabi-v7a/', 'lib/x86/', 'lib/x86_64/', 'lib/armeabi/', 'lib/mips/', 'lib/mips64/']
 FDROID_DIR = '../fdroid_crawler'
 NATIVE_FILE = os.path.join(FDROID_DIR, 'natives')
 # OUT_DIR = 'fdroid_result'
@@ -333,7 +333,7 @@ def apk_run(path, out=None, output_cg=False, comprise=False):
         if not os.path.exists(out):
             os.makedirs(out)
     perf.start()
-    apk, _, dex = AnalyzeAPK(path)
+    apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
     with apk.zip as zf, tempfile.TemporaryDirectory() as tmpd:
         chosen_abi_dir = select_abi_dir(zf.namelist())
         if chosen_abi_dir is None:
@@ -344,46 +344,45 @@ def apk_run(path, out=None, output_cg=False, comprise=False):
             if n.endswith('.so') and n.startswith(chosen_abi_dir):
                 logger.debug(f'Start to analyze {n}')
                 so_file = zf.extract(n, path=tmpd)
-                with mp.Manager() as mgr:
-                    returns = mgr.dict()
-                    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(so_file, dex)
-                    if proj is None:
-                        logger.warning(f'Project object generation failed for {n}')
-                        continue
-                    if dynamic_timeout:
-                        perf.add_dynamic_reg_timeout()
-                    func_info = dict()
-                    (funcs_addrs, cfg) = get_function_addresses(proj, output_cg, out)
-                    for func, addr in funcs_addrs:
-                        proj.hook(addr, hook=cg_addr_hook)
-                        func_info.update({func:[addr]})
-                    global_refs = {
-                        'func_info': mgr.dict(func_info),
-                        'func_stack': mgr.list()
-                    }
-                    perf.add_analyzed_so()
-                    for jni_func, record in Record.RECORDS.items():
-                        # clear func stack before each analysis
-                        global_refs.get('func_stack')[:] = list()
-                        # wrap the analysis with its own process to limit the
-                        # analysis time.
-                        p = mp.Process(target=analyze_jni_function,
-                                args=(*(jni_func, proj, jvm, jenv, cfg, dex, returns, global_refs),))
-                        p.start()
-                        perf.add_analyzed_func()
-                        # For analysis of each .so file, we wait for 3mins at most.
-                        p.join(WAIT_TIME)
-                        if p.is_alive():
-                            perf.add_timeout()
-                            p.terminate()
-                            p.join()
-                            logger.warning(f'Timeout when analyzing {n}')
-                    for addr, elems in returns.items():
-                        record = Record.RECORDS.get(addr)
-                        for elem in elems:
-                            record.add_elem(elem)
-                    file_name = n.split('/')[-1] + '.result'
-                    print_records(os.path.join(out, file_name))
+                returns = dict()
+                proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(so_file, dex)
+                if proj is None:
+                    logger.warning(f'Project object generation failed for {n}')
+                    continue
+                if dynamic_timeout:
+                    perf.add_dynamic_reg_timeout()
+                func_info = dict()
+                (funcs_addrs, cfg) = get_function_addresses(proj, output_cg, out)
+                for func, addr in funcs_addrs:
+                    proj.hook(addr, hook=cg_addr_hook)
+                    func_info.update({func:[addr]})
+                global_refs = {
+                    'func_info': dict(func_info),
+                    'func_stack': list()
+                }
+                perf.add_analyzed_so()
+                for jni_func, record in Record.RECORDS.items():
+                    # clear func stack before each analysis
+                    global_refs.get('func_stack')[:] = list()
+                    # wrap the analysis with its own process to limit the
+                    # analysis time.
+                    p = mp.Process(target=analyze_jni_function,
+                            args=(*(jni_func, proj, jvm, jenv, cfg, dex, returns, global_refs),))
+                    p.start()
+                    perf.add_analyzed_func()
+                    # For analysis of each .so file, we wait for 3mins at most.
+                    p.join(WAIT_TIME)
+                    if p.is_alive():
+                        perf.add_timeout()
+                        p.terminate()
+                        p.join()
+                        logger.warning(f'Timeout when analyzing {n}')
+                for addr, elems in returns.items():
+                    record = Record.RECORDS.get(addr)
+                    for elem in elems:
+                        record.add_elem(elem)
+                file_name = n.split('/')[-1] + '.result'
+                print_records(os.path.join(out, file_name))
     perf.end()
     print_performance(perf, out)
     if comprise:

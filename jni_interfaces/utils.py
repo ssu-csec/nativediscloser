@@ -272,7 +272,7 @@ def parse_params_from_sig(signature):
     if match is None:
         return plist, has_obj
     param_str = match.group('params')
-    ms = re.findall(cls_pat, param_str)
+    ms = re.findall(cls_pat.encode('utf-8'), param_str.encode('utf-8'))
     if len(ms) > 0:
         has_obj = True
     plist = list()
