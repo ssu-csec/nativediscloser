@@ -1,5 +1,5 @@
 from base64 import b64encode
-from ast_protobuf.ast_serialization import convertAst
+from ..ast_protobuf.ast_serialization import convertAst
 
 def cls_2_dot_pattern(cls_name):
     """ Transform all class names to the dot seperated form.

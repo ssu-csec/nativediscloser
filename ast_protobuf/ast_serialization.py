@@ -1,6 +1,6 @@
 import claripy
 from angr.state_plugins.sim_action_object import SimActionObject
-import ast_protobuf.ast_pb2 as ast_pb2
+from . import ast_pb2 as ast_pb2
 # import ast_pb2
 
 from pdb import pm

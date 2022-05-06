@@ -13,7 +13,7 @@ from .jni_invoke import jni_invoke_interface as jvm
 from .jni_native import jni_native_interface as jenv
 from .record import Record, RecordNotFoundError
 from .conditions_history import ConditionsHistoryUpdater
-from ast_protobuf.ast_serialization import convertAst
+from ..ast_protobuf.ast_serialization import convertAst
 
 JNI_LOADER = 'JNI_OnLoad'
 # value for "LengthLimiter" to limit the length of path a state goes through.
@@ -35,27 +35,27 @@ def record_static_jni_functions(native_project, apk_project=None):
     if apk_project is not None:
         native_methods = []
         for cls in apk_project.loader.main_object.classes.values():
-            native_methods.extend([method for method in cls.methods if 'NATIVE' in method.attr])
+            native_methods.extend([method for method in cls.methods if 'NATIVE' in method.attrs])
     for s in native_project.loader.symbols:
         if s.name.startswith('Java'):
             # Note: the signature extracted does not have return value info
-            cls, method, sig = extract_names(s.name)
+            cls, mth, sig = extract_names(s.name)
             func_ptr = s.rebased_addr
             if apk_project is None:
                 # without the class info from Dex, this is it
-                Record(cls, method, f'({sig})', func_ptr, s.name, None, False, True)
+                Record(cls, mth, f'({sig})', func_ptr, s.name, None, False, True)
             else:
                 # further verify and improve signature with return info
                 for method in native_methods:
                     if method.class_name == cls \
-                       and method.name == method:
+                       and method.name == mth:
                         if sig is None:
                             sig = translate_to_signature(method)
                             if 'STATIC' in method.attrs:
                                 is_static_method = True
                             else:
                                 is_static_method = False
-                            Record(cls, method, sig, func_ptr, s.name,
+                            Record(cls, mth, sig, func_ptr, s.name,
                                    is_static_method, False, True)
                             break
 

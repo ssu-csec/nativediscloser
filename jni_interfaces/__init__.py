@@ -6,7 +6,7 @@ JNI_PROCEDURES = dict()
 
 
 def find_simprocs(module_name, container):
-    module = importlib.import_module(module_name, 'jni_interfaces')
+    module = importlib.import_module(module_name, 'nativediscloser.jni_interfaces')
     for attr_name in dir(module):
         attr = getattr(module, attr_name)
         if isinstance(attr, type) and issubclass(attr, JPB):

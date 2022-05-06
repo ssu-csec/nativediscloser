@@ -11,11 +11,11 @@ import cle
 import pydot
 import networkx as nx
 import logging
-from androguard.misc import AnalyzeAPK
+#from androguard.misc import AnalyzeAPK
 
-from import_implementations import hookAllImportSymbols
-from jni_interfaces.record import Record
-from jni_interfaces.utils import (record_static_jni_functions, clean_records,
+from .import_implementations import hookAllImportSymbols
+from .jni_interfaces.record import Record
+from .jni_interfaces.utils import (record_static_jni_functions, clean_records,
         record_dynamic_jni_functions, print_records, analyze_jni_function,
         jni_env_prepare_in_object, JNI_LOADER)
 
@@ -337,7 +337,7 @@ def apk_run(acg, out=None, output_cg=False, comprise=False):
     perf.start()
     project = acg.project
     native_proj = acg.native_project
-    apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
+    #apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
     proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project)     # kordood
     with apk.zip as zf, tempfile.TemporaryDirectory() as tmpd:
         chosen_abi_dir = select_abi_dir(zf.namelist())
@@ -400,7 +400,7 @@ def refactor_cls_name(raw_name):
 
 
 def find_all_jni_functions(native_project, apk_project):
-    native_project, jvm_ptr, jenv_ptr = None, None, None
+    native_project, jvm_ptr, jenv_ptr = native_project, None, None
     # Mark whether the analysis for dynamic registration is timeout.
     dynamic_analysis_timeout = False
     hookAllImportSymbols(native_project)
