@@ -325,7 +325,9 @@ def get_function_addresses(proj, output_cg=False, path=None):
     return (funcs_addrs, cfg)
 
 
-def apk_run(path, out=None, output_cg=False, comprise=False):
+#def apk_run(path, out=None, output_cg=False, comprise=False):
+def apk_run(acg, out=None, output_cg=False, comprise=False):
+    path = acg.project.loader.main_object.binary
     perf = Performance()
     if out is None:
         result_dir = path.split('/')[-1].rstrip('.apk') + '_result'
@@ -333,7 +335,10 @@ def apk_run(path, out=None, output_cg=False, comprise=False):
         if not os.path.exists(out):
             os.makedirs(out)
     perf.start()
+    project = acg.project
+    native_proj = acg.native_project
     apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
+    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project)     # kordood
     with apk.zip as zf, tempfile.TemporaryDirectory() as tmpd:
         chosen_abi_dir = select_abi_dir(zf.namelist())
         if chosen_abi_dir is None:
@@ -394,34 +399,20 @@ def refactor_cls_name(raw_name):
     return raw_name.lstrip('L').rstrip(';').replace('/', '.')
 
 
-def find_all_jni_functions(so_file, dex):
-    proj, jvm_ptr, jenv_ptr = None, None, None
+def find_all_jni_functions(native_project, apk_project):
+    native_project, jvm_ptr, jenv_ptr = None, None, None
     # Mark whether the analysis for dynamic registration is timeout.
     dynamic_analysis_timeout = False
-    try:
-        proj = angr.Project(so_file, auto_load_libs=False)
-    except Exception as e:
-        logger.warning(f'{so_file} cause angr loading error: {e}')
-    else:
-        hookAllImportSymbols(proj)
-        jvm_ptr, jenv_ptr = jni_env_prepare_in_object(proj)
-        clean_records()
-        record_static_jni_functions(proj, dex)
-        if proj.loader.find_symbol(JNI_LOADER):
-            # wrap the analysis with its own process to limit the analysis time.
-            with mp.Manager() as mgr:
-                records = mgr.dict()
-                p = mp.Process(target=record_dynamic_jni_functions,
-                        args=(*(proj, jvm_ptr, jenv_ptr, dex, records),))
-                p.start()
-                p.join(DYNAMIC_ANALYSIS_TIME)
-                if p.is_alive():
-                    dynamic_analysis_timeout = True
-                    p.terminate()
-                    p.join()
-                    logger.warning('Timeout when analyzing dynamic registration')
-                Record.RECORDS.update(records)
-    return proj, jvm_ptr, jenv_ptr, dynamic_analysis_timeout
+    hookAllImportSymbols(native_project)
+    jvm_ptr, jenv_ptr = jni_env_prepare_in_object(native_project)
+    clean_records()
+    record_static_jni_functions(native_project, apk_project)
+    if native_project.loader.find_symbol(JNI_LOADER):
+        # wrap the analysis with its own process to limit the analysis time.
+        records = dict()
+        record_dynamic_jni_functions(native_project, jvm_ptr, jenv_ptr, apk_project, records)
+        Record.RECORDS.update(records)
+    return native_project, jvm_ptr, jenv_ptr, dynamic_analysis_timeout
 
 
 if __name__ == '__main__':

@@ -26,37 +26,73 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-def record_static_jni_functions(proj, dex=None):
+def record_static_jni_functions(native_project, apk_project=None):
     """record the statically exported JNI functions
     The strategy is to 1st find the symbol names started with 'Java',
     2nd verify the truth of JNI function by check the class part of the name
     with classes in the 'cls_list' which is from dex files of the APK.
     """
-    if dex is not None:
-        native_methods = [m for m in dex.get_methods() if 'native' in m.access]
-    for s in proj.loader.symbols:
+    if apk_project is not None:
+        native_methods = []
+        for cls in apk_project.loader.main_object.classes.values():
+            native_methods.extend([method for method in cls.methods if 'NATIVE' in method.attr])
+    for s in native_project.loader.symbols:
         if s.name.startswith('Java'):
             # Note: the signature extracted does not have return value info
             cls, method, sig = extract_names(s.name)
             func_ptr = s.rebased_addr
-            if dex is None:
+            if apk_project is None:
                 # without the class info from Dex, this is it
                 Record(cls, method, f'({sig})', func_ptr, s.name, None, False, True)
             else:
                 # further verify and improve signature with return info
-                refactored_cls_name = f'L{cls.replace(".", "/")};'
-                for m in native_methods:
-                    if m.get_method().get_class_name() == refactored_cls_name \
-                       and m.name == method:
-                        if sig is None or m.descriptor.startswith(f'({sig})'):
-                            sig = m.descriptor
-                            if 'static' in m.access:
+                for method in native_methods:
+                    if method.class_name == cls \
+                       and method.name == method:
+                        if sig is None:
+                            sig = translate_to_signature(method)
+                            if 'STATIC' in method.attrs:
                                 is_static_method = True
                             else:
                                 is_static_method = False
                             Record(cls, method, sig, func_ptr, s.name,
                                    is_static_method, False, True)
                             break
+
+
+def translate_to_signature(method):
+    params = method.params
+    ret = method.ret
+    signature = "("
+
+    for param in params:
+        param_sig = replace_class_signature(param) if '.' in param else replace_primitive_signature(param)
+        signature += f" {param_sig}"
+
+    signature = signature.replace('( ', '(')
+    ret_sig = replace_class_signature(ret) if '.' in ret else replace_primitive_signature(ret)
+    signature += f"){ret_sig}"
+    return signature
+
+
+def replace_class_signature(string):
+    array_count = string.count('[]')
+    signature = f"{'[' * array_count}L{string.replace('[]', '').replace('.', '/')};"
+    return signature
+
+
+def replace_primitive_signature(string):
+    signature_map = {"void": 'V',
+                     "boolean": 'Z',
+                     "byte": 'B',
+                     "char": 'C',
+                     "short": 'S',
+                     "int": 'I',
+                     "long": 'J',
+                     "float": 'F',
+                     "double": 'D'
+                     }
+    return signature_map[string]
 
 
 def extract_names(symbol):
@@ -81,10 +117,10 @@ def extract_names(symbol):
     return cls_name, method_name, sig
 
 
-def record_dynamic_jni_functions(proj, jvm_ptr, jenv_ptr, dex=None, records=None):
-    state = get_prepared_jni_onload_state(proj, jvm_ptr, jenv_ptr, dex)
+def record_dynamic_jni_functions(native_project, jvm_ptr, jenv_ptr, apk_project=None, records=None):
+    state = get_prepared_jni_onload_state(native_project, jvm_ptr, jenv_ptr, apk_project)
     tech = LengthLimiter(DYNAMIC_ANALYSIS_LENGTH)
-    simgr = proj.factory.simgr(state)
+    simgr = native_project.factory.simgr(state)
     simgr.use_technique(tech)
     try:
         simgr.run()
@@ -96,38 +132,38 @@ def record_dynamic_jni_functions(proj, jvm_ptr, jenv_ptr, dex=None, records=None
         records.update(Record.RECORDS)
 
 
-def jni_env_prepare_in_object(proj):
-    jni_addr_size = proj.arch.bits // 8
+def jni_env_prepare_in_object(native_project):
+    jni_addr_size = native_project.arch.bits // 8
     jvm_size = jni_addr_size * len(jvm)
     jenv_size = jni_addr_size * len(jenv)
-    jvm_ptr = proj.loader.extern_object.allocate(jvm_size)
-    jenv_ptr = proj.loader.extern_object.allocate(jenv_size)
+    jvm_ptr = native_project.loader.extern_object.allocate(jvm_size)
+    jenv_ptr = native_project.loader.extern_object.allocate(jenv_size)
     for idx, name in enumerate(jvm):
         addr = jvm_ptr + idx * jni_addr_size
-        try_2_hook(name, proj, addr)
+        try_2_hook(name, native_project, addr)
     for idx, name in enumerate(jenv):
         addr = jenv_ptr + idx * jni_addr_size
-        try_2_hook(name, proj, addr)
+        try_2_hook(name, native_project, addr)
     register_jni_relevant_data_type()
     return jvm_ptr, jenv_ptr
 
 
-def try_2_hook(jni_func_name, proj, addr):
+def try_2_hook(jni_func_name, native_project, addr):
     proc = JNI_PROCEDURES.get(jni_func_name)
     if proc:
-        proj.hook(addr, proc())
+        native_project.hook(addr, proc())
     else:
-        proj.hook(addr, NotImplementedJNIFunction())
+        native_project.hook(addr, NotImplementedJNIFunction())
 
 
-def jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, dex=None):
+def jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, apk_project=None):
     # store JVM and JENV pointer on the state for global use
     state.globals['jvm_ptr'] = jvm_ptr
     state.globals['jni_invoke_interface'] = jvm
     state.globals['jenv_ptr'] = jenv_ptr
     state.globals['jni_native_interface'] = jenv
-    if dex is not None:
-        state.globals['dex'] = dex
+    if apk_project is not None:
+        state.globals['apk_project'] = apk_project
     addr_size = state.project.arch.bits
     for idx in range(len(jvm)):
         jvm_func_addr = jvm_ptr + idx * addr_size // 8
@@ -141,16 +177,16 @@ def jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, dex=None):
                            endness=state.project.arch.memory_endness)
 
 
-def get_prepared_jni_onload_state(proj, jvm_ptr, jenv_ptr, dex=None):
-    func_jni_onload = proj.loader.find_symbol(JNI_LOADER)
-    state = proj.factory.call_state(func_jni_onload.rebased_addr, jvm_ptr)
-    jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, dex)
+def get_prepared_jni_onload_state(native_project, jvm_ptr, jenv_ptr, apk_project=None):
+    func_jni_onload = native_project.loader.find_symbol(JNI_LOADER)
+    state = native_project.factory.call_state(func_jni_onload.rebased_addr, jvm_ptr)
+    jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, apk_project)
     return state
 
 
-def analyze_jni_function(func_addr, proj, jvm_ptr, jenv_ptr, cfg, dex=None, returns=None, global_refs=None):
-    func_params, updates, constraints = get_jni_function_params(proj, func_addr, jenv_ptr)
-    state = proj.factory.call_state(func_addr, *func_params)
+def analyze_jni_function(func_addr, native_project, jvm_ptr, jenv_ptr, cfg, apk_project=None, returns=None, global_refs=None):
+    func_params, updates, constraints = get_jni_function_params(native_project, func_addr, jenv_ptr)
+    state = native_project.factory.call_state(func_addr, *func_params)
     state.globals['func_ptr'] = func_addr
     if global_refs is not None:
         for k, v in global_refs.items():
@@ -159,9 +195,9 @@ def analyze_jni_function(func_addr, proj, jvm_ptr, jenv_ptr, cfg, dex=None, retu
         state.globals[k] = v
     for c in constraints:
         state.add_constraints(c)
-    jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, dex)
+    jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, apk_project)
     tech = LengthLimiter(MAX_LENGTH)
-    simgr = proj.factory.simgr(state)
+    simgr = native_project.factory.simgr(state)
     simgr.use_technique(tech)
 
     tech = LoopSeer(cfg=cfg, bound=MAX_LOOP_ITER, limit_concrete_loops=False)
@@ -193,7 +229,7 @@ def analyze_jni_function(func_addr, proj, jvm_ptr, jenv_ptr, cfg, dex=None, retu
             returns.update({func_addr: invokees+return_values})
 
 
-def get_jni_function_params(proj, func_addr, jenv_ptr):
+def get_jni_function_params(native_project, func_addr, jenv_ptr):
     constraints = []
     record = Record.RECORDS.get(func_addr)
     if record is None:
@@ -207,7 +243,7 @@ def get_jni_function_params(proj, func_addr, jenv_ptr):
     jclass = JavaClass(record.cls)
     if record.static_method:
         jclass.init = True
-    ref = proj.loader.extern_object.allocate()
+    ref = native_project.loader.extern_object.allocate()
     # The second hidden parameter is either a jclass or jobject of the current
     # Java class where the native method lives. If it is a static method in
     # Java side, it will be a jclass otherwise a jobject.
@@ -221,22 +257,22 @@ def get_jni_function_params(proj, func_addr, jenv_ptr):
     # setups. Since it will not affect our analysis.
     if plist is not None and has_obj:
         symbol_values = {
-                'Z': BVS('boolean_value', proj.arch.bits),
-                '[Z': BVS('boolean_array', proj.arch.bits),
-                'B': BVS('byte_value', proj.arch.bits),
-                '[B': BVS('byte_array', proj.arch.bits),
-                'C': BVS('char_value', proj.arch.bits),
-                '[C': BVS('char_array', proj.arch.bits),
-                'S': BVS('short_value', proj.arch.bits),
-                '[S': BVS('short_array', proj.arch.bits),
-                'I': BVS('int_value', proj.arch.bits),
-                '[I': BVS('int_array', proj.arch.bits),
-                'J': BVS('long_value', proj.arch.bits),
-                '[J': BVS('long_array', proj.arch.bits),
-                'F': BVS('float_value', proj.arch.bits),
-                '[F': BVS('float_array', proj.arch.bits),
-                'D': BVS('double_value', proj.arch.bits),
-                '[D': BVS('double_array', proj.arch.bits),
+                'Z': BVS('boolean_value', native_project.arch.bits),
+                '[Z': BVS('boolean_array', native_project.arch.bits),
+                'B': BVS('byte_value', native_project.arch.bits),
+                '[B': BVS('byte_array', native_project.arch.bits),
+                'C': BVS('char_value', native_project.arch.bits),
+                '[C': BVS('char_array', native_project.arch.bits),
+                'S': BVS('short_value', native_project.arch.bits),
+                '[S': BVS('short_array', native_project.arch.bits),
+                'I': BVS('int_value', native_project.arch.bits),
+                '[I': BVS('int_array', native_project.arch.bits),
+                'J': BVS('long_value', native_project.arch.bits),
+                '[J': BVS('long_array', native_project.arch.bits),
+                'F': BVS('float_value', native_project.arch.bits),
+                '[F': BVS('float_array', native_project.arch.bits),
+                'D': BVS('double_value', native_project.arch.bits),
+                '[D': BVS('double_array', native_project.arch.bits),
         }
         param_nb = 0
         for p in plist:
@@ -253,8 +289,8 @@ def get_jni_function_params(proj, func_addr, jenv_ptr):
                     jclass = JavaClass(cls_name, init=True)
                 if p.startswith('['):
                     jclass.is_array = True
-                ref = proj.loader.extern_object.allocate()
-                obj_symbol = BVS("param_#%i" % (param_nb+1), proj.arch.bits)
+                ref = native_project.loader.extern_object.allocate()
+                obj_symbol = BVS("param_#%i" % (param_nb+1), native_project.arch.bits)
                 constraints.append(obj_symbol == ref)
                 state_updates.update({ref: jclass})
                 param = obj_symbol

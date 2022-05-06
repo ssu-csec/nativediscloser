@@ -646,7 +646,7 @@ class RegisterNatives(JPB):
         # is the native method is a static method
         is_static_method = None
         obfuscated = False
-        dex = self.state.globals.get('dex')
+        dex = self.state.globals.get('apk_project')
         if dex is None:
             obfuscated = None
         else:
