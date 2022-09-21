@@ -1,6 +1,7 @@
 from base64 import b64encode
 from ..ast_protobuf.ast_serialization import convertAst
 
+
 def cls_2_dot_pattern(cls_name):
     """ Transform all class names to the dot seperated form.
     """
@@ -16,8 +17,18 @@ def sig_refine(sig):
     sig = sig.replace(' ', '')
     return sig
 
+
 def get_str_from_symb_expr(expr):
     return b64encode(convertAst(expr).SerializeToString()).decode()
+
+
+def record_jni_function(caller_address, function_name, class_name='', name='', signature=''):
+    Record.JNI_RECORDS[caller_address] = {'type': function_name,
+                                          'class': class_name,
+                                          'name': name,
+                                          'signature': signature
+                                          }
+
 
 class Invokee:
     def __init__(self, method, argument_expressions, return_value, guard_condition):
@@ -58,6 +69,8 @@ class ReturnValue:
 class Record:
     # global records, indexed by the address of corresponding JNI function pointer
     RECORDS = dict()
+    JNI_RECORDS = dict()
+    FIELD_RECORDS = dict()
 
     def __init__(self, cls_name, method_name, signature, func_ptr, symbol_name,
              static_method=None, obfuscated=None, static_export=False):

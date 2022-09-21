@@ -302,9 +302,9 @@ def find_func(addr, f_info, addr_type):
 
 def get_function_addresses(proj, output_cg=False, path=None):
     funcs_addrs = list()
-    cfg = proj.analyses.CFGFast()
-    for addr in cfg.functions:
-        f = cfg.functions[addr]
+    kb = proj.kb
+    for addr in kb.functions:
+        f = kb.functions[addr]
         if not f.is_simprocedure and not f.is_syscall and not f.is_plt and not proj.is_hooked(addr):
             funcs_addrs.append((f.name, addr))
     if output_cg:
@@ -320,9 +320,9 @@ def get_function_addresses(proj, output_cg=False, path=None):
             for func, addr in funcs_addrs:
                 print(f'{func}:{addr}', file=f)
         # output the CG as a dot file. Can use the "dot" command of Graphviz access.
-        dot = nx.nx_pydot.to_pydot(cfg.functions.callgraph)
+        dot = nx.nx_pydot.to_pydot(kb.functions.callgraph)
         dot.write(cg_path)
-    return (funcs_addrs, cfg)
+    return funcs_addrs
 
 
 #def apk_run(path, out=None, output_cg=False, comprise=False):
@@ -338,61 +338,35 @@ def apk_run(acg, out=None, output_cg=False, comprise=False):
     project = acg.project
     native_proj = acg.native_project
     #apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
+    returns = dict()
     proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project)     # kordood
-    with apk.zip as zf, tempfile.TemporaryDirectory() as tmpd:
-        chosen_abi_dir = select_abi_dir(zf.namelist())
-        if chosen_abi_dir is None:
-            logger.debug(f'No ABI directories were found for .so file in {path}')
-            return
-        logger.debug(f'Use shared library (i.e., .so) files from {chosen_abi_dir}')
-        for n in zf.namelist():
-            if n.endswith('.so') and n.startswith(chosen_abi_dir):
-                logger.debug(f'Start to analyze {n}')
-                so_file = zf.extract(n, path=tmpd)
-                returns = dict()
-                proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(so_file, dex)
-                if proj is None:
-                    logger.warning(f'Project object generation failed for {n}')
-                    continue
-                if dynamic_timeout:
-                    perf.add_dynamic_reg_timeout()
-                func_info = dict()
-                (funcs_addrs, cfg) = get_function_addresses(proj, output_cg, out)
-                for func, addr in funcs_addrs:
-                    proj.hook(addr, hook=cg_addr_hook)
-                    func_info.update({func:[addr]})
-                global_refs = {
-                    'func_info': dict(func_info),
-                    'func_stack': list()
-                }
-                perf.add_analyzed_so()
-                for jni_func, record in Record.RECORDS.items():
-                    # clear func stack before each analysis
-                    global_refs.get('func_stack')[:] = list()
-                    # wrap the analysis with its own process to limit the
-                    # analysis time.
-                    p = mp.Process(target=analyze_jni_function,
-                            args=(*(jni_func, proj, jvm, jenv, cfg, dex, returns, global_refs),))
-                    p.start()
-                    perf.add_analyzed_func()
-                    # For analysis of each .so file, we wait for 3mins at most.
-                    p.join(WAIT_TIME)
-                    if p.is_alive():
-                        perf.add_timeout()
-                        p.terminate()
-                        p.join()
-                        logger.warning(f'Timeout when analyzing {n}')
-                for addr, elems in returns.items():
-                    record = Record.RECORDS.get(addr)
-                    for elem in elems:
-                        record.add_elem(elem)
-                file_name = n.split('/')[-1] + '.result'
-                print_records(os.path.join(out, file_name))
-    perf.end()
-    print_performance(perf, out)
-    if comprise:
-        from mylib.common import zipdir
-        zipdir(result_dir, out, OUT_DIR, True)
+    if proj is None:
+        logger.warning(f'Project object generation failed for {project.loader.binary}')
+        return
+    if dynamic_timeout:
+        perf.add_dynamic_reg_timeout()
+    func_info = dict()
+    funcs_addrs = get_function_addresses(proj, output_cg, out)
+    cfg = acg.native_cfg
+    for func, addr in funcs_addrs:
+        proj.hook(addr, hook=cg_addr_hook)
+        func_info.update({func:[addr]})
+    global_refs = {
+        'func_info': dict(func_info),
+        'func_stack': list(),
+        'field_info': dict(),
+    }
+    perf.add_analyzed_so()
+    for jni_func, record in Record.RECORDS.items():
+        # clear func stack before each analysis
+        global_refs.get('func_stack')[:] = list()
+        # wrap the analysis with its own process to limit the
+        # analysis time.
+        analyze_jni_function(jni_func, proj, jvm, jenv, cfg, project, returns, global_refs)
+        perf.add_analyzed_func()
+        # For analysis of each .so file, we wait for 3mins at most.
+
+    return returns
 
 
 def refactor_cls_name(raw_name):

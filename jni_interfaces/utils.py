@@ -4,6 +4,7 @@ import logging
 import traceback
 from base64 import b64encode
 from claripy import BVS
+from angr import DEFAULT_CC
 from angr.sim_type import register_types, parse_type
 from angr.exploration_techniques import LengthLimiter, LoopSeer
 
@@ -217,7 +218,8 @@ def analyze_jni_function(func_addr, native_project, jvm_ptr, jenv_ptr, cfg, apk_
     if(len(simgr.stashes['cut'])>0):
         logger.warning(f'LengthLimiter has triggered during the execution of function @0x%x' % func_addr)
     for st in simgr.stashes['deadended']:
-        Record.RECORDS.get(func_addr).add_return_value(st.regs.r0, guard_condition=st.cond_hist)
+        return_regsister = DEFAULT_CC[simgr._project.arch.name].RETURN_VAL.reg_name
+        Record.RECORDS.get(func_addr).add_return_value(st.registers.load(return_regsister), guard_condition=st.cond_hist)
     print("===========================================")
 
     # for multiprocess running. param "returns" should be a        
@@ -225,8 +227,15 @@ def analyze_jni_function(func_addr, native_project, jvm_ptr, jenv_ptr, cfg, apk_
     if returns is not None:
         invokees = Record.RECORDS.get(func_addr).get_invokees()
         return_values = Record.RECORDS.get(func_addr).get_return_values()
+        jni_records = Record.JNI_RECORDS
+        java_values = {key: value for key, value in global_refs['field_info'].items() if '/' in key} if global_refs is not None \
+            else None
         if invokees is not None and return_values is not None:
             returns.update({func_addr: invokees+return_values})
+            if java_values is not None:
+                returns.update(java_values)
+        if jni_records:
+            returns.update({'jni_record': jni_records})
 
 
 def get_jni_function_params(native_project, func_addr, jenv_ptr):

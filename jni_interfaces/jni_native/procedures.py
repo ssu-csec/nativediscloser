@@ -2,28 +2,65 @@ import logging
 import archinfo
 from ..common import JNIProcedureBase as JPB
 from ..common import JNIEnvMissingError
-from ..record import Record
+from ..record import Record, record_jni_function
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+
+def find_caller_address(project, state):
+    parent = state.history.parent
+    caller_address = None
+
+    if project.loader.find_object_containing(parent.addr) is None:
+        pass
+    elif parent.addr == state.addr:
+        pass
+    else:
+        caller_address = parent.addr
+
+    return caller_address
+
+
 class NewStringUTF(JPB):
     def run(self, buff):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            signature = 'Ljava/lang/String;'
+            record_jni_function(caller_address, function_name='Ljava/lang/String;', signature=signature)
+
         ret_symb = self.state.solver.BVS('jstring_from_buff', self.arch.bits)
         return ret_symb
 
 class GetStringUTFChars(JPB):
     def run(self, string, pIsCopy):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            signature = 'Ljava/lang/String;'
+            record_jni_function(caller_address, function_name=self.__class__.__name__, signature=signature)
+
         ret_symb = self.state.solver.BVS('buff_from_%s' % str(string), self.arch.bits)
         return ret_symb
 
 class ReleaseStringUTFChars(JPB):
     def run(self, string, pUtfChars):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         return
 
 class GetArrayLength(JPB):
     def run(self, array):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         ret_symb = self.state.solver.BVS('length_of_%s' % str(array), self.arch.bits)
         return ret_symb
 
@@ -31,6 +68,11 @@ class GetArrayLength(JPB):
 
 class GetArrayElements(JPB):
     def run(self, array, pIsCopy):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         ret_symb = self.state.solver.BVS('elements_of_%s' % str(array), self.arch.bits)
         return ret_symb
 
@@ -61,6 +103,11 @@ class GetDoubleArrayElements(GetArrayElements):
 class GetClass(JPB):
     def run(self, env_ptr, cls_name_ptr):
         cls_name = self.load_string_from_memory(cls_name_ptr)
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__, class_name=cls_name)
+
         return self.create_java_class(cls_name)
 
 
@@ -74,6 +121,11 @@ class FindClass(GetClass):
 
 class NewRef(JPB):
     def run(self, env_ptr, obj_ptr):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         return obj_ptr
 
 
@@ -103,10 +155,21 @@ class NewObjectA(NewRef):
 class GetField(JPB):
     def run(self, env, obj, field_ptr):
         field = self.get_ref(field_ptr)
+
         if field is None:
             desc = 'field obtained via GetField which failed to parse fieldID'
             return self.create_field(obj, None, desc=desc)
         else:
+            caller_address = find_caller_address(self.project, self.state)
+
+            if caller_address:
+                record_jni_function(caller_address,
+                                    function_name=self.__class__.__name__,
+                                    class_name=field.cls.name,
+                                    name=field.name,
+                                    signature=field.ftype,
+                                    )
+
             return self.create_field(obj, field, desc="%s.%s" % (str(obj), field.name))
 
 class GetObjectField(GetField):
@@ -138,9 +201,22 @@ class GetDoubleField(GetField):
 
 class SetField(JPB):
     def run(self, env, klass, fid, value):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            field = self.get_ref(fid)
+            record_jni_function(caller_address,
+                                function_name=self.__class__.__name__,
+                                class_name=self.get_ref(klass).name,
+                                name=field.name,
+                                signature=field.ftype,
+                                )
         print("SetField %s %s %s" %(klass, fid, value))
 
 class SetObjectField(SetField):
+    pass
+
+class SetStaticObjectField(SetField):
     pass
 
 class SetBooleanField(SetField):
@@ -170,10 +246,16 @@ class SetDoubleField(SetField):
 class GetObjectClass(JPB):
     def run(self, env, obj_ptr):
         obj = self.get_ref(obj_ptr)
+
         if obj is None:
             desc = 'jclass obtained via "GetObjectClass" and cannot be parsed'
             return self.create_java_class(None, desc=desc)
         else:
+            caller_address = find_caller_address(self.project, self.state)
+
+            if caller_address:
+                record_jni_function(caller_address, function_name=self.__class__.__name__, class_name=obj.name)
+
             return obj_ptr
 
 
@@ -182,6 +264,17 @@ class GetMethodBase(JPB):
         cls = self.get_ref(cls_ptr)
         method_name = self.load_string_from_memory(method_name_ptr)
         signature = self.load_string_from_memory(sig_ptr)
+
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address,
+                                function_name=self.__class__.__name__,
+                                class_name=cls.name,
+                                name=method_name,
+                                signature=signature
+                                )
+
         return self.create_java_method_ID(cls, method_name,
                 signature, self.is_static())
 
@@ -204,6 +297,17 @@ class GetFieldID(JPB):
         cls = self.get_ref(cls_ptr)
         name = self.load_string_from_memory(field_name_ptr)
         signature = self.load_string_from_memory(sig_ptr)
+
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address,
+                                function_name=self.__class__.__name__,
+                                class_name=cls.name,
+                                name=name,
+                                signature=signature
+                                )
+
         return self.create_java_field_ID(cls, name, signature)
 
 
@@ -214,10 +318,21 @@ class GetStaticFieldID(GetFieldID):
 class GetObjectField(JPB):
     def run(self, env_ptr, _, field_ptr):
         field = self.get_ref(field_ptr)
+
         if field is None:
             desc = 'jobject obtained via GetObjectField which failed to parse'
             return self.create_java_class(None, init=True, desc=desc)
         else:
+            caller_address = find_caller_address(self.project, self.state)
+
+            if caller_address:
+                record_jni_function(caller_address,
+                                    function_name=self.__class__.__name__,
+                                    class_name=field.cls.name,
+                                    name=field.name,
+                                    signature=field.ftype
+                                    )
+
             return self.create_java_class(field.ftype.strip('L;').replace('/', '.'),
                                       init=True)
 
@@ -240,6 +355,17 @@ class CallMethodBase(JPB):
             else:
                 cur_func = self.get_cur_func()
                 record.add_invokee(method, cur_func, self.get_arguments_symbols(method.signature), return_value, self.state.cond_hist)
+
+                caller_address = find_caller_address(self.project, self.state)
+
+                if caller_address:
+                    record_jni_function(caller_address,
+                                        function_name=self.__class__.__name__,
+                                        class_name=method.cls.name,
+                                        name=method.name,
+                                        signature=method.signature
+                                        )
+
         if return_value != None:
             return return_value
 
@@ -303,7 +429,7 @@ class CallMethodBase(JPB):
 
 class CallMethodParamArg(CallMethodBase):
     def get_argument_value(self, arg_index):
-        return self.arg(3+arg_index)
+        return self.arguments[2+arg_index]
 
 class CallMethodArrayArg(CallMethodBase):
     def get_argument_value(self, arg_index):
@@ -311,7 +437,7 @@ class CallMethodArrayArg(CallMethodBase):
 
 class CallMethodVaArg(CallMethodBase):
     def get_argument_value(self, arg_index):
-        return self.state.memory.load(self.arg(3)+4*arg_index, 4, endness=self.arch.memory_endness)
+        return self.state.memory.load(self.arguments[2]+4*arg_index, 4, endness=self.arch.memory_endness)
 
     # According to Android's "jni.h" source code, invocation of "Call...Method"
     # will always lead to the invocation of the corresponding "Call...MethodV"
@@ -592,24 +718,56 @@ class CallStaticObjectMethodA(CallReturnObjectMethod, CallMethodArrayArg):
 
 class NewObjectArray(JPB):
     def run(self, env_ptr, size, cls_ptr, obj_ptr):
+        parent = self.state.history.parent
+        caller_addr = None
+        if self.project.loader.find_object_containing(parent.addr) is None:
+            pass
+        elif parent.addr == self.state.addr:
+            pass
+        else:
+            caller_addr = parent.addr
+
+        if caller_addr:
+            Record.JNI_RECORDS[caller_addr] = {'type': self.__class__.__name__,
+                                               'class': '',
+                                               'name': '',
+                                               'signature': '',
+                                               'caller': caller_addr
+                                               }
+
         # simply use the one of the element
         return obj_ptr
 
 
 class GetObjectArrayElement(JPB):
     def run(self, env_ptr, array_ptr, index):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         # As we simplied, the array is the element
         return array_ptr
 
 
 class SetObjectArrayElement(JPB):
     def run(self, env_ptr, array_ptr, index, elememt_ptr):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         # to simplify, nothing need to be done.
         pass
 
 
 class RegisterNatives(JPB):
     def run(self, env, cls_ptr, methods, method_num):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
         # Exceptions could happen deal to unknown reasons (e.g., value passing
         # via customized structures). Use exception catching to avoid the program
         # from crashing.
@@ -662,7 +820,7 @@ class RegisterNatives(JPB):
                 elif len(cs) == 0:
                     # class name obfuscated
                     if len(ms) == 1:
-                        cls_name = ms[0].get_method().get_class_name()
+                        cls_name = ms[0].get_native_method().get_class_name()
                         signature = ms[0].descriptor
                         if 'static' in ms[0].access:
                             is_static_method = True
@@ -674,7 +832,7 @@ class RegisterNatives(JPB):
                         sigs = set()
                         static_count = 0
                         for m in ms:
-                            classes.add(m.get_method().get_class_name())
+                            classes.add(m.get_native_method().get_class_name())
                             sigs.add(m.descriptor)
                             if 'static' in m.access:
                                 static_count += 1
