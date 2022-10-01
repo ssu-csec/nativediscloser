@@ -2,7 +2,7 @@ import logging
 import archinfo
 from ..common import JNIProcedureBase as JPB
 from ..common import JNIEnvMissingError
-from ..record import Record, record_jni_function
+from ..record import Record, record_jni_function, register_dynamic
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ def find_caller_address(project, state):
         pass
     else:
         caller_address = parent.addr
+        if "JNIEnv" in project.loader.describe_addr(caller_address):
+            caller_address = parent.parent.addr
 
     return caller_address
 
@@ -29,10 +31,15 @@ class NewStringUTF(JPB):
 
         if caller_address:
             signature = 'Ljava/lang/String;'
-            record_jni_function(caller_address, function_name='Ljava/lang/String;', signature=signature)
+            record_jni_function(caller_address, function_name=self.__class__.__name__, signature=signature)
 
         ret_symb = self.state.solver.BVS('jstring_from_buff', self.arch.bits)
         return ret_symb
+
+
+class NewString(NewStringUTF):
+    pass
+
 
 class GetStringUTFChars(JPB):
     def run(self, string, pIsCopy):
@@ -124,7 +131,10 @@ class NewRef(JPB):
         caller_address = find_caller_address(self.project, self.state)
 
         if caller_address:
-            record_jni_function(caller_address, function_name=self.__class__.__name__)
+            ref = self.get_ref(obj_ptr)
+            class_name = ref.name if ref else ""
+            # Todo: Does it need to consider is_array or init?
+            record_jni_function(caller_address, function_name=self.__class__.__name__, class_name=class_name)
 
         return obj_ptr
 
@@ -146,10 +156,12 @@ class NewObject(NewRef):
 
 
 class NewObjectV(NewRef):
+    # Handle args
     pass
 
 
 class NewObjectA(NewRef):
+    # Handle args
     pass
 
 class GetField(JPB):
@@ -761,6 +773,57 @@ class SetObjectArrayElement(JPB):
         pass
 
 
+class GetRegion(JPB):
+    def run(self, env_ptr, string, start_ptr, length, buf_ptr):
+        caller_address = find_caller_address(self.project, self.state)
+
+        if caller_address:
+            record_jni_function(caller_address, function_name=self.__class__.__name__)
+
+        ret_symb = self.state.solver.BVS('elements_of_%s' % str(string), self.arch.bits)
+        return ret_symb
+
+
+class GetBooleanArrayRegion(GetRegion):
+    pass
+
+
+class GetByteArrayRegion(GetRegion):
+    pass
+
+
+class GetCharArrayRegion(GetRegion):
+    pass
+
+
+class GetShortArrayRegion(GetRegion):
+    pass
+
+
+class GetIntArrayRegion(GetRegion):
+    pass
+
+
+class GetLongArrayRegion(GetRegion):
+    pass
+
+
+class GetFloatArrayRegion(GetRegion):
+    pass
+
+
+class GetDoubleArrayRegion(GetRegion):
+    pass
+
+
+class GetStringRegion(GetRegion):
+    pass
+
+
+class GetStringUTFRegion(GetRegion):
+    pass
+
+
 class RegisterNatives(JPB):
     def run(self, env, cls_ptr, methods, method_num):
         caller_address = find_caller_address(self.project, self.state)
@@ -782,10 +845,18 @@ class RegisterNatives(JPB):
                 signature = method.signature.deref.string.concrete
                 fn_ptr = method.fnPtr.long.concrete
                 symbol = self.func_ptr_2_symbol_name(fn_ptr)
-                c, m, s, static, obfuscated = self._dex_heuristic(cls_name,
-                        name.decode('utf-8', 'ignore'),
-                        signature.decode('utf-8', 'ignore'))
-                Record(c, m, s, fn_ptr, symbol, static, obfuscated)
+
+                register_dynamic(function_name=self.__class__.__name__,
+                                 class_name=cls_name,
+                                 name=name.decode('utf-8', 'ignore'),
+                                 signature=signature.decode('utf-8', 'ignore'),
+                                 function=fn_ptr
+                                 )
+
+                # c, m, s, static, obfuscated = self._dex_heuristic(cls_name,
+                #         name.decode('utf-8', 'ignore'),
+                #         signature.decode('utf-8', 'ignore'))
+                # Record(c, m, s, fn_ptr, symbol, static, obfuscated)
         except Exception as e:
             logger.warning(f'Parsing "RegisterNatives" failed with error: {e}')
         return self.JNI_OK

@@ -16,8 +16,8 @@ import logging
 from .import_implementations import hookAllImportSymbols
 from .jni_interfaces.record import Record
 from .jni_interfaces.utils import (record_static_jni_functions, clean_records,
-        record_dynamic_jni_functions, print_records, analyze_jni_function,
-        jni_env_prepare_in_object, JNI_LOADER)
+                                   record_dynamic_jni_functions, record_dynamic_method, print_records,
+                                   analyze_jni_function, jni_env_prepare_in_object, JNI_LOADER)
 
 ANGR_RETDEC_OFFSET = 4194305
 
@@ -339,18 +339,24 @@ def apk_run(acg, out=None, output_cg=False, comprise=False):
     native_proj = acg.native_project
     #apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
     returns = dict()
-    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project)     # kordood
+
+    dynamic_methods = find_dynamic_registered_methods(native_proj, acg.native_addrs, acg.full_callgraph)
+    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project, dynamic_methods)     # kordood
     if proj is None:
         logger.warning(f'Project object generation failed for {project.loader.binary}')
         return
     if dynamic_timeout:
         perf.add_dynamic_reg_timeout()
     func_info = dict()
-    funcs_addrs = get_function_addresses(proj, output_cg, out)
     cfg = acg.native_cfg
-    for func, addr in funcs_addrs:
-        proj.hook(addr, hook=cg_addr_hook)
-        func_info.update({func:[addr]})
+    # funcs_addrs = get_function_addresses(proj, output_cg, out)
+    # for func, addr in funcs_addrs:
+    for addr in acg.native_addrs:
+        func = acg.native_cfg.functions.function(addr=addr)
+        if func:
+            proj.hook(addr, hook=cg_addr_hook)
+            func_info.update({func.name:[addr]})
+
     global_refs = {
         'func_info': dict(func_info),
         'func_stack': list(),
@@ -366,14 +372,27 @@ def apk_run(acg, out=None, output_cg=False, comprise=False):
         perf.add_analyzed_func()
         # For analysis of each .so file, we wait for 3mins at most.
 
-    return returns
+    return Record
+
+
+def find_dynamic_registered_methods(native_project, func_addrs, callgraph):
+    dynamic_methods = dict()
+
+    for addr in func_addrs:
+        symbol = native_project.loader.find_symbol(addr)
+        if symbol is not None and not symbol.name.startswith("Java_") and symbol.name != "JNI_OnLoad":
+            preds = list(callgraph.predecessors(addr))
+            if len(preds) > 0:
+                dynamic_methods[addr] = preds[0]
+
+    return dynamic_methods
 
 
 def refactor_cls_name(raw_name):
     return raw_name.lstrip('L').rstrip(';').replace('/', '.')
 
 
-def find_all_jni_functions(native_project, apk_project):
+def find_all_jni_functions(native_project, apk_project, dynamic_method=None):
     native_project, jvm_ptr, jenv_ptr = native_project, None, None
     # Mark whether the analysis for dynamic registration is timeout.
     dynamic_analysis_timeout = False
@@ -381,6 +400,8 @@ def find_all_jni_functions(native_project, apk_project):
     jvm_ptr, jenv_ptr = jni_env_prepare_in_object(native_project)
     clean_records()
     record_static_jni_functions(native_project, apk_project)
+    if dynamic_method or len(dynamic_method) > 0:
+        record_dynamic_method(native_project, apk_project, dynamic_method)
     if native_project.loader.find_symbol(JNI_LOADER):
         # wrap the analysis with its own process to limit the analysis time.
         records = dict()

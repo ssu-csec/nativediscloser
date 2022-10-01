@@ -61,9 +61,37 @@ def record_static_jni_functions(native_project, apk_project=None):
                             break
 
 
+def record_dynamic_method(native_project, apk_project, dynamic_method):
+    if apk_project is not None:
+        native_methods = []
+        for class_name in apk_project.loader.main_object.classes.values():
+            native_methods.extend([method for method in class_name.methods if 'NATIVE' in method.attrs])
+
+    for addr, soot_node in dynamic_method.items():
+        symbol = native_project.loader.find_symbol(addr)
+        if symbol:
+            # Note: the signature extracted does not have return value info
+            class_name = soot_node.class_name
+            name = soot_node.name
+            sig = ''
+            func_ptr = addr
+            if apk_project is None:
+                # without the class info from Dex, this is it
+                Record(class_name, name, f'({sig})', func_ptr, symbol.name, None, False, True)
+            else:
+                sig = translate_to_signature(soot_node)
+                if 'STATIC' in soot_node.attrs:
+                    is_static_method = True
+                else:
+                    is_static_method = False
+                Record(class_name, name, sig, func_ptr, symbol.name,
+                       is_static_method, False, True)
+                break
+
+
 def translate_to_signature(method):
     params = method.params
-    ret = method.ret
+    ret = method.ret if method.ret else 'void'
     signature = "("
 
     for param in params:
@@ -228,6 +256,7 @@ def analyze_jni_function(func_addr, native_project, jvm_ptr, jenv_ptr, cfg, apk_
         invokees = Record.RECORDS.get(func_addr).get_invokees()
         return_values = Record.RECORDS.get(func_addr).get_return_values()
         jni_records = Record.JNI_RECORDS
+        dynamic_records = Record.DYNAMIC_RECORDS
         java_values = {key: value for key, value in global_refs['field_info'].items() if '/' in key} if global_refs is not None \
             else None
         if invokees is not None and return_values is not None:
@@ -236,6 +265,8 @@ def analyze_jni_function(func_addr, native_project, jvm_ptr, jenv_ptr, cfg, apk_
                 returns.update(java_values)
         if jni_records:
             returns.update({'jni_record': jni_records})
+        if dynamic_records:
+            returns.update({'dynamic_record': dynamic_records})
 
 
 def get_jni_function_params(native_project, func_addr, jenv_ptr):
@@ -317,7 +348,7 @@ def parse_params_from_sig(signature):
     if match is None:
         return plist, has_obj
     param_str = match.group('params')
-    ms = re.findall(cls_pat.encode('utf-8'), param_str.encode('utf-8'))
+    ms = re.findall(cls_pat, param_str)
     if len(ms) > 0:
         has_obj = True
     plist = list()

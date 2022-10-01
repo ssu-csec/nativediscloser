@@ -30,6 +30,15 @@ def record_jni_function(caller_address, function_name, class_name='', name='', s
                                           }
 
 
+def register_dynamic(function_name, class_name='', name='', signature='', function=None):
+    Record.DYNAMIC_RECORDS.append({'type': function_name,
+                                   'class': class_name,
+                                   'name': name,
+                                   'signature': signature,
+                                   'function': function
+                                   })
+
+
 class Invokee:
     def __init__(self, method, argument_expressions, return_value, guard_condition):
         self.cls_name = cls_2_dot_pattern(method.cls.name) if method.cls is not None else None
@@ -71,6 +80,7 @@ class Record:
     RECORDS = dict()
     JNI_RECORDS = dict()
     FIELD_RECORDS = dict()
+    DYNAMIC_RECORDS = list()
 
     def __init__(self, cls_name, method_name, signature, func_ptr, symbol_name,
              static_method=None, obfuscated=None, static_export=False):
