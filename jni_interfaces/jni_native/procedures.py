@@ -31,7 +31,8 @@ class NewStringUTF(JPB):
 
         if caller_address:
             signature = 'Ljava/lang/String;'
-            value_str = hex(self.state.solver.eval(self.state.mem[self.state.regs.x1].basic_string.resolved))[2:]
+            arg1 = self.cc.ARG_REGS[1]
+            value_str = hex(self.state.solver.eval(self.state.mem[self.state.regs.get(arg1)].basic_string.resolved))[2:]
             value = bytes.fromhex(value_str).decode("ASCII")
 
             record_jni_function(caller_address, function_name=self.__class__.__name__, name=value, signature=signature)
