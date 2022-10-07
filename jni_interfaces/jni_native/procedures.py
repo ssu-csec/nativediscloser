@@ -31,7 +31,10 @@ class NewStringUTF(JPB):
 
         if caller_address:
             signature = 'Ljava/lang/String;'
-            record_jni_function(caller_address, function_name=self.__class__.__name__, signature=signature)
+            value_str = hex(self.state.solver.eval(self.state.mem[self.state.regs.x1].basic_string.resolved))[2:]
+            value = bytes.fromhex(value_str).decode("ASCII")
+
+            record_jni_function(caller_address, function_name=self.__class__.__name__, name=value, signature=signature)
 
         ret_symb = self.state.solver.BVS('jstring_from_buff', self.arch.bits)
         return ret_symb
