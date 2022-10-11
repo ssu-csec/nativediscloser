@@ -119,7 +119,15 @@ def replace_primitive_signature(string):
                      "int": 'I',
                      "long": 'J',
                      "float": 'F',
-                     "double": 'D'
+                     "double": 'D',
+                     "boolean[]": '[Z',
+                     "byte[]": '[B',
+                     "char[]": '[C',
+                     "short[]": '[S',
+                     "int[]": '[I',
+                     "long[]": '[J',
+                     "float[]": '[F',
+                     "double[]": '[D'
                      }
     return signature_map[string]
 
