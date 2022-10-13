@@ -32,8 +32,9 @@ class NewStringUTF(JPB):
         if caller_address:
             signature = 'Ljava/lang/String;'
             arg1 = self.cc.ARG_REGS[1]
-            value_str = hex(self.state.solver.eval(self.state.mem[self.state.regs.get(arg1)].basic_string.resolved))[2:]
-            if isinstance(value_str, str):
+            string_val = self.state.solver.eval(self.state.mem[self.state.regs.get(arg1)].basic_string.resolved)
+            value_str = hex(string_val)[2:]
+            if len(value_str) > 1:
                 value = bytes.fromhex(value_str).decode('utf-8', 'ignore')
             else:
                 value = value_str
