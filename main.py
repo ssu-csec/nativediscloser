@@ -261,7 +261,7 @@ def cg_addr_hook(state):
             info.append(return_addr)
             # as func_info is a dict proxy, the list object have always to be updated.
             func_info.update({func: info})
-            state.project.hook(return_addr, hook=cg_addr_hook)
+            state.native_project.hook(return_addr, hook=cg_addr_hook)
     else:
         # check if exiting current function
         addrs = func_info.get(func_stack[-1])
@@ -279,7 +279,7 @@ def cg_addr_hook(state):
             info.append(return_addr)
             # as func_info is a dict proxy, the list object have always to be updated.
             func_info.update({func: info})
-            state.project.hook(return_addr, hook=cg_addr_hook)
+            state.native_project.hook(return_addr, hook=cg_addr_hook)
 
 
 def find_func(addr, f_info, addr_type):
@@ -326,8 +326,8 @@ def get_function_addresses(proj, output_cg=False, path=None):
 
 
 #def apk_run(path, out=None, output_cg=False, comprise=False):
-def apk_run(acg, out=None, output_cg=False, comprise=False):
-    path = acg.project.loader.main_object.binary
+def apk_run(native_finder, out=None, output_cg=False, comprise=False):
+    path = native_finder.apk_project.loader.main_object.binary
     perf = Performance()
     if out is None:
         result_dir = path.split('/')[-1].rstrip('.apk') + '_result'
@@ -335,24 +335,29 @@ def apk_run(acg, out=None, output_cg=False, comprise=False):
         if not os.path.exists(out):
             os.makedirs(out)
     perf.start()
-    project = acg.project
-    native_proj = acg.native_project
+    project = native_finder.apk_project
+    native_project = native_finder.native_project
     #apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
     returns = dict()
 
-    dynamic_methods = find_dynamic_registered_methods(native_proj, acg.native_addrs, acg.full_callgraph)
-    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_proj, project, dynamic_methods)     # kordood
+    dynamic_methods = find_dynamic_registered_methods(native_project, native_finder.native_addrs, native_finder.callgraph)
+    # if native_finder.is_native_activity:
+    #     native_activity_entry = native_finder.native_addrs
+    # else:
+    #     native_activity_entry = None
+    # proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_project, project, dynamic_methods, native_activity_entry)     # kordood
+    proj, jvm, jenv, dynamic_timeout = find_all_jni_functions(native_project, project, dynamic_methods)     # kordood
     if proj is None:
         logger.warning(f'Project object generation failed for {project.loader.binary}')
         return
     if dynamic_timeout:
         perf.add_dynamic_reg_timeout()
     func_info = dict()
-    cfg = acg.native_cfg
+    cfg = native_finder.native_cfg
     # funcs_addrs = get_function_addresses(proj, output_cg, out)
     # for func, addr in funcs_addrs:
-    for addr in acg.native_addrs:
-        func = acg.native_cfg.functions.function(addr=addr)
+    for addr in native_finder.native_addrs:
+        func = native_finder.native_cfg.functions.function(addr=addr)
         if func:
             proj.hook(addr, hook=cg_addr_hook)
             func_info.update({func.name:[addr]})

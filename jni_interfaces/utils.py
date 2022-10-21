@@ -201,17 +201,17 @@ def jni_env_prepare_in_state(state, jvm_ptr, jenv_ptr, apk_project=None):
     state.globals['jni_native_interface'] = jenv
     if apk_project is not None:
         state.globals['apk_project'] = apk_project
-    addr_size = state.project.arch.bits
+    addr_size = state.native_project.arch.bits
     for idx in range(len(jvm)):
         jvm_func_addr = jvm_ptr + idx * addr_size // 8
         state.memory.store(addr=jvm_func_addr,
                            data=state.solver.BVV(jvm_func_addr, addr_size),
-                           endness=state.project.arch.memory_endness)
+                           endness=state.native_project.arch.memory_endness)
     for idx in range(len(jenv)):
         jenv_func_addr = jenv_ptr + idx * addr_size // 8
         state.memory.store(addr=jenv_func_addr,
                            data=state.solver.BVV(jenv_func_addr, addr_size),
-                           endness=state.project.arch.memory_endness)
+                           endness=state.native_project.arch.memory_endness)
 
 
 def get_prepared_jni_onload_state(native_project, jvm_ptr, jenv_ptr, apk_project=None):
