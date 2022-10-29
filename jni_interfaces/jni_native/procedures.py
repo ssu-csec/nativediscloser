@@ -449,7 +449,11 @@ class CallMethodBase(JPB):
 
 class CallMethodParamArg(CallMethodBase):
     def get_argument_value(self, arg_index):
-        return self.arguments[2+arg_index]
+        arg_index = 2 + arg_index
+        if arg_index < len(self.arguments):
+            return self.arguments[arg_index]
+        else:
+            return None
 
 class CallMethodArrayArg(CallMethodBase):
     def get_argument_value(self, arg_index):
