@@ -261,7 +261,7 @@ def cg_addr_hook(state):
             info.append(return_addr)
             # as func_info is a dict proxy, the list object have always to be updated.
             func_info.update({func: info})
-            state.native_project.hook(return_addr, hook=cg_addr_hook)
+            state.project.hook(return_addr, hook=cg_addr_hook)
     else:
         # check if exiting current function
         addrs = func_info.get(func_stack[-1])
@@ -279,7 +279,7 @@ def cg_addr_hook(state):
             info.append(return_addr)
             # as func_info is a dict proxy, the list object have always to be updated.
             func_info.update({func: info})
-            state.native_project.hook(return_addr, hook=cg_addr_hook)
+            state.project.hook(return_addr, hook=cg_addr_hook)
 
 
 def find_func(addr, f_info, addr_type):
@@ -397,7 +397,7 @@ def refactor_cls_name(raw_name):
     return raw_name.lstrip('L').rstrip(';').replace('/', '.')
 
 
-def find_all_jni_functions(native_project, apk_project, dynamic_method=None):
+def find_all_jni_functions(native_project, apk_project, dynamic_method=None, native_activity_entry=None):
     native_project, jvm_ptr, jenv_ptr = native_project, None, None
     # Mark whether the analysis for dynamic registration is timeout.
     dynamic_analysis_timeout = False
@@ -412,6 +412,17 @@ def find_all_jni_functions(native_project, apk_project, dynamic_method=None):
         records = dict()
         record_dynamic_jni_functions(native_project, jvm_ptr, jenv_ptr, apk_project, records)
         Record.RECORDS.update(records)
+    if native_activity_entry:
+        for entry in native_activity_entry:
+            class_name = "NativeActivity"
+            name = "android_main"
+            sig = "()V"
+            func_ptr = entry
+            symbol = native_project.loader.find_symbol(0x40226c)
+            is_static_method = False
+            record = Record(class_name, name, sig, func_ptr, symbol.name, is_static_method, False, True, True)
+            Record.RECORDS.update({func_ptr: record})
+
     return native_project, jvm_ptr, jenv_ptr, dynamic_analysis_timeout
 
 
