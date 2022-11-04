@@ -340,7 +340,8 @@ def apk_run(native_finder, out=None, output_cg=False, comprise=False):
     #apk, _, dex = AnalyzeAPK(path)      # Replace to apk project
     returns = dict()
 
-    dynamic_methods = find_dynamic_registered_methods(native_project, native_finder.native_addrs, native_finder.callgraph)
+    # dynamic_methods = find_dynamic_registered_methods(native_project, native_finder.native_addrs, native_finder.callgraph)
+    dynamic_methods = native_finder.dynamic_registered_methods
     # if native_finder.is_native_activity:
     #     native_activity_entry = native_finder.native_addrs
     # else:
