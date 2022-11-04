@@ -62,11 +62,6 @@ def record_static_jni_functions(native_project, apk_project=None):
 
 
 def record_dynamic_method(native_project, apk_project, dynamic_method):
-    if apk_project is not None:
-        native_methods = []
-        for class_name in apk_project.loader.main_object.classes.values():
-            native_methods.extend([method for method in class_name.methods if 'NATIVE' in method.attrs])
-
     for addr, soot_node in dynamic_method.items():
         symbol = native_project.loader.find_symbol(addr)
         if symbol:
@@ -86,7 +81,6 @@ def record_dynamic_method(native_project, apk_project, dynamic_method):
                     is_static_method = False
                 Record(class_name, name, sig, func_ptr, symbol.name,
                        is_static_method, False, True)
-                break
 
 
 def translate_to_signature(method):
